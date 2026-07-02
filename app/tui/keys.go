@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 // keyMap holds the application-level key bindings. Navigation within the list
 // and viewport (up/down, page up/down) is handled by those components' own

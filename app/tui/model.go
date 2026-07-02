@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/bdnelson/sse-webhook-tunnel/core/event"
 )
@@ -84,7 +84,7 @@ func New(sourceURL, targetURL string) Model {
 
 	return Model{
 		list:      l,
-		viewport:  viewport.New(0, 0),
+		viewport:  viewport.New(),
 		keys:      defaultKeyMap(),
 		mode:      listView,
 		startTime: time.Now(),
@@ -124,7 +124,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case EventMsg:
 		return m.handleEvent(msg), nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 
@@ -138,8 +138,8 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) Model {
 	m.ready = true
 
 	m.list.SetSize(msg.Width, msg.Height-statusHeight)
-	m.viewport.Width = msg.Width
-	m.viewport.Height = msg.Height - headerHeight - statusHeight
+	m.viewport.SetWidth(msg.Width)
+	m.viewport.SetHeight(msg.Height - headerHeight - statusHeight)
 	return m
 }
 
@@ -153,7 +153,7 @@ func (m Model) handleEvent(msg EventMsg) Model {
 
 // handleKey processes application-level key bindings and otherwise delegates to
 // the active component.
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// ctrl+c is always an emergency escape hatch.
 	if key.Matches(msg, m.keys.ForceQuit) {
 		return m, tea.Quit
@@ -195,9 +195,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // handleCommandKey edits and executes the ":" command line. The command line is
 // dismissed on Esc, on Enter, or when Backspace deletes past the colon. Only
 // "q" (and "q!") quit; any other command is ignored.
-func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEnter:
+func (m Model) handleCommandKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
 		command := m.command
 		m.commandMode = false
 		m.command = ""
@@ -205,11 +205,11 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m, nil
-	case tea.KeyEsc:
+	case "esc":
 		m.commandMode = false
 		m.command = ""
 		return m, nil
-	case tea.KeyBackspace:
+	case "backspace":
 		if m.command == "" {
 			m.commandMode = false
 			return m, nil
@@ -217,14 +217,14 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		runes := []rune(m.command)
 		m.command = string(runes[:len(runes)-1])
 		return m, nil
-	case tea.KeySpace:
-		m.command += " "
-		return m, nil
-	case tea.KeyRunes:
-		m.command += string(msg.Runes)
+	default:
+		// msg.Text holds the literal printable text (including space) for
+		// text-producing keys, and is empty for control keys.
+		if msg.Text != "" {
+			m.command += msg.Text
+		}
 		return m, nil
 	}
-	return m, nil
 }
 
 // delegateToActive forwards a message to whichever component is on screen so
@@ -240,18 +240,23 @@ func (m Model) delegateToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// View implements tea.Model.
-func (m Model) View() string {
-	if !m.ready {
-		return "Initializing..."
+// View implements tea.Model. In Bubble Tea v2 the view is a tea.View struct;
+// AltScreen keeps the program in the alternate screen buffer (the v1
+// WithAltScreen program option was removed).
+func (m Model) View() tea.View {
+	var content string
+	switch {
+	case !m.ready:
+		content = "Initializing..."
+	case m.mode == detailView:
+		content = m.detailScreen()
+	default:
+		content = m.listScreen()
 	}
 
-	switch m.mode {
-	case detailView:
-		return m.detailScreen()
-	default:
-		return m.listScreen()
-	}
+	view := tea.NewView(content)
+	view.AltScreen = true
+	return view
 }
 
 func (m Model) listScreen() string {
