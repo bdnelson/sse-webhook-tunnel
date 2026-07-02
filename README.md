@@ -6,6 +6,8 @@ to an internal target URL, in the spirit of
 channel, replays each received event as an HTTP request to a target you control,
 and displays the inbound events interactively so you can inspect their payloads.
 
+![Screenshot of the running TUI](/docs/screenshot.png)
+
 ## Table of Contents
 
 - [How it works](#how-it-works)
