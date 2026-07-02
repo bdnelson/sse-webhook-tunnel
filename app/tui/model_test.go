@@ -99,19 +99,125 @@ func TestModel_Esc_ReturnsToList(t *testing.T) {
 	}
 }
 
-func TestModel_Quit(t *testing.T) {
+// pressRunes feeds each rune to the model as a KeyRunes message.
+func pressRunes(t *testing.T, m Model, s string) Model {
+	t.Helper()
+	for _, r := range s {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+	return m
+}
+
+func TestModel_BareQ_DoesNotQuit(t *testing.T) {
 	m := newTestModel(t)
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
-	if cmd == nil {
-		t.Fatal("expected quit command")
+	if cmd != nil {
+		t.Errorf("bare 'q' should not quit, got command %v", cmd())
 	}
-	if msg := cmd(); msg == nil {
-		t.Error("quit command produced nil message")
+}
+
+func TestModel_ColonQEnter_Quits(t *testing.T) {
+	m := newTestModel(t)
+
+	// ":" opens the command line.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	m = updated.(Model)
+	if !m.commandMode {
+		t.Fatal("expected command mode after ':'")
 	}
-	// ctrl+c should also quit.
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	// Typing "q" should not quit until Enter.
+	m = pressRunes(t, m, "q")
+	if m.command != "q" {
+		t.Errorf("command buffer = %q, want \"q\"", m.command)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
 	if cmd == nil {
-		t.Fatal("expected quit command for ctrl+c")
+		t.Fatal("expected quit command after ':q<enter>'")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("expected tea.QuitMsg, got %T", cmd())
+	}
+	if m.commandMode {
+		t.Error("command mode should be cleared after execution")
+	}
+}
+
+func TestModel_CtrlC_ForceQuits(t *testing.T) {
+	m := newTestModel(t)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("expected force-quit command for ctrl+c")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("expected tea.QuitMsg, got %T", cmd())
+	}
+}
+
+func TestModel_CommandLine_EscCancels(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	m = updated.(Model)
+	m = pressRunes(t, m, "q")
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.commandMode {
+		t.Error("esc should cancel command mode")
+	}
+	if cmd != nil {
+		t.Errorf("esc should not quit, got %v", cmd())
+	}
+}
+
+func TestModel_CommandLine_UnknownCommandIgnored(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	m = updated.(Model)
+	m = pressRunes(t, m, "xyz")
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Errorf("unknown command should not quit, got %v", cmd())
+	}
+	if m.commandMode {
+		t.Error("command mode should be cleared after unknown command")
+	}
+}
+
+func TestModel_CommandLine_Backspace(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	m = updated.(Model)
+	m = pressRunes(t, m, "q")
+
+	// Backspace clears the buffer; a second backspace closes the command line.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = updated.(Model)
+	if m.command != "" {
+		t.Errorf("command buffer = %q, want empty", m.command)
+	}
+	if !m.commandMode {
+		t.Error("command mode should remain until backspace past the colon")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = updated.(Model)
+	if m.commandMode {
+		t.Error("backspace past the colon should close the command line")
+	}
+}
+
+func TestModel_CommandLine_RenderedInView(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	m = updated.(Model)
+	m = pressRunes(t, m, "q")
+	if !strings.Contains(m.View(), ":q") {
+		t.Errorf("view should show the command line ':q'; got:\n%s", m.View())
 	}
 }
 

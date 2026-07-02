@@ -53,8 +53,14 @@ type Model struct {
 	ready     bool
 	now       func() time.Time
 
-	statusStyle lipgloss.Style
-	headerStyle lipgloss.Style
+	// commandMode is true while the user is typing a ":" command.
+	commandMode bool
+	// command is the text typed after the ":" (excluding the colon).
+	command string
+
+	statusStyle  lipgloss.Style
+	headerStyle  lipgloss.Style
+	commandStyle lipgloss.Style
 }
 
 var _ tea.Model = Model{}
@@ -66,6 +72,15 @@ func New(sourceURL, targetURL string) Model {
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(true)
+	// The list's own "q"/"esc" quit bindings are removed so it does not
+	// advertise or consume them; quitting is handled by the model via ":q".
+	l.DisableQuitKeybindings()
+	l.AdditionalShortHelpKeys = func() []key.Binding {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand")),
+			key.NewBinding(key.WithKeys(":"), key.WithHelp(":q", "quit")),
+		}
+	}
 
 	return Model{
 		list:      l,
@@ -80,7 +95,8 @@ func New(sourceURL, targetURL string) Model {
 			Foreground(lipgloss.Color("231")).
 			Background(lipgloss.Color("57")).
 			Padding(0, 1),
-		headerStyle: lipgloss.NewStyle().Bold(true).Padding(0, 1),
+		headerStyle:  lipgloss.NewStyle().Bold(true).Padding(0, 1),
+		commandStyle: lipgloss.NewStyle().Padding(0, 1),
 	}
 }
 
@@ -138,8 +154,22 @@ func (m Model) handleEvent(msg EventMsg) Model {
 // handleKey processes application-level key bindings and otherwise delegates to
 // the active component.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.Matches(msg, m.keys.Quit) {
+	// ctrl+c is always an emergency escape hatch.
+	if key.Matches(msg, m.keys.ForceQuit) {
 		return m, tea.Quit
+	}
+
+	// While typing a ":" command, keys edit the command line rather than
+	// navigating.
+	if m.commandMode {
+		return m.handleCommandKey(msg)
+	}
+
+	// ":" opens the command line (from either view).
+	if key.Matches(msg, m.keys.Command) {
+		m.commandMode = true
+		m.command = ""
+		return m, nil
 	}
 
 	switch m.mode {
@@ -160,6 +190,41 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.delegateToActive(msg)
+}
+
+// handleCommandKey edits and executes the ":" command line. The command line is
+// dismissed on Esc, on Enter, or when Backspace deletes past the colon. Only
+// "q" (and "q!") quit; any other command is ignored.
+func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEnter:
+		command := m.command
+		m.commandMode = false
+		m.command = ""
+		if command == "q" || command == "q!" {
+			return m, tea.Quit
+		}
+		return m, nil
+	case tea.KeyEsc:
+		m.commandMode = false
+		m.command = ""
+		return m, nil
+	case tea.KeyBackspace:
+		if m.command == "" {
+			m.commandMode = false
+			return m, nil
+		}
+		runes := []rune(m.command)
+		m.command = string(runes[:len(runes)-1])
+		return m, nil
+	case tea.KeySpace:
+		m.command += " "
+		return m, nil
+	case tea.KeyRunes:
+		m.command += string(msg.Runes)
+		return m, nil
+	}
+	return m, nil
 }
 
 // delegateToActive forwards a message to whichever component is on screen so
@@ -190,7 +255,7 @@ func (m Model) View() string {
 }
 
 func (m Model) listScreen() string {
-	return lipgloss.JoinVertical(lipgloss.Left, m.list.View(), m.statusLine())
+	return lipgloss.JoinVertical(lipgloss.Left, m.list.View(), m.bottomLine())
 }
 
 func (m Model) detailScreen() string {
@@ -200,7 +265,25 @@ func (m Model) detailScreen() string {
 	} else {
 		header = m.headerStyle.Render("(esc: back)")
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, header, m.viewport.View(), m.statusLine())
+	return lipgloss.JoinVertical(lipgloss.Left, header, m.viewport.View(), m.bottomLine())
+}
+
+// bottomLine renders the command line while a ":" command is being typed,
+// otherwise the status line. Both occupy a single row so the layout is stable.
+func (m Model) bottomLine() string {
+	if m.commandMode {
+		return m.commandLine()
+	}
+	return m.statusLine()
+}
+
+// commandLine renders the ":" command prompt with the current input.
+func (m Model) commandLine() string {
+	content := ":" + m.command
+	if m.width > 0 {
+		return m.commandStyle.Width(m.width).Render(content)
+	}
+	return m.commandStyle.Render(content)
 }
 
 // statusLine renders uptime, event count, and target URL.

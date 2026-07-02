@@ -82,4 +82,5 @@ Run the sink and source, then start the tunnel:
 ```
 
 Events appear in the TUI every three seconds; the sink logs each forwarded POST.
-Press `enter` to inspect a payload, `pgup`/`pgdn` to page, and `q` to quit.
+Press `enter` to inspect a payload, `pgup`/`pgdn` to page, and `:q` then `enter`
+to quit (`ctrl+c` force-quits).

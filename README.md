@@ -51,7 +51,7 @@ variable fallback. Flags take precedence over the environment.
 | `--insecure` | `INSECURE` | `false` | Skip TLS verification for the target (self-signed internal certs) |
 
 Logs are written to a file rather than the console because the TUI owns the
-terminal. See `zarf/.env.sample` for an environment template.
+terminal. 
 
 ## Running
 
@@ -84,7 +84,12 @@ A worked local example is in [docs/usage.md](docs/usage.md).
 | `enter` | Expand the selected event to view its JSON payload |
 | `esc` / `backspace` | Return to the list from the detail view |
 | `↑` / `↓`, `pgup` / `pgdn` | Scroll the payload in the detail view |
-| `q` / `ctrl+c` | Quit |
+| `:q` then `enter` | Quit (type `:` to open the command line, then `q`) |
+| `ctrl+c` | Force quit (emergency escape hatch) |
+
+Quitting is deliberate — a single keystroke will not end the session. Type `:`
+to open a command line at the bottom of the screen, then `q` and `enter`, in the
+manner of vim.
 
 ## Development
 
@@ -111,8 +116,7 @@ Run a single package's tests with `make test-pkg PKG=./core/sse`.
 │   ├── forward/        # HTTP forwarder to the target
 │   └── sse/            # Server-Sent Events client (standard library)
 ├── lib/logger/         # zap wrapper writing to a file
-├── docs/               # Supplementary documentation
-└── zarf/               # Deployment artifacts and samples
+└── docs/               # Supplementary documentation
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
