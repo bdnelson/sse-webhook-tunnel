@@ -45,7 +45,7 @@ run: ## Run the project
 	go run ./api/cli
 
 build: ## Build the project
-	go build -buildvcs=false -o $(BIN_NAME) ./api/cli
+	go build -o $(BIN_NAME) ./api/cli
 
 clean: ## Clean outputs
 	rm -f $(BIN_NAME)
@@ -107,44 +107,5 @@ security: ## Security check code
 	@echo
 	gosec $(ALLGO)
 
-docker-build: ## Build Docker image
-	@echo "$(BLUE)Building Docker image...$(NC)"
-	docker build -t $(BIN_NAME):latest --file zarf/$(BIN_NAME).dockerfile .
-
-docker-run: ## Run Docker container
-	@echo "$(BLUE)Running Docker container...$(NC)"
-	docker run -p 8080:8080 -p 8081:8081 $(BIN_NAME):latest
-
-docker-sh: ## Run Docker container shell for debugging
-	@echo "$(BLUE)Running Docker container shell...$(NC)"
-	docker run -it $(BIN_NAME):latest sh
-
-tilt-infra-only: ## Start supporting infrastructure (postgres)
-	@echo "$(BLUE)Starting Tilt infrastructure only...$(NC)"
-	tilt up postgres --file=zarf/Tiltfile
-
-tilt-up: ## Start Tilt for local development
-	@echo "$(BLUE)Starting Tilt...$(NC)"
-	tilt up --file=zarf/Tiltfile
-
-tilt-logs: ## Tail Tilt logs
-	tilt logs
-
-tilt-logs-watch: ## Watch Tilt logs
-	tilt logs -f
-
-tilt-trigger: ## Trigger agent execution
-	tilt trigger $(BIN_NAME)
-
-tilt-down: ## Stop Tilt
-	@echo "$(YELLOW)Stopping Tilt...$(NC)"
-	tilt down --file=zarf/Tiltfile
-
 todo: ## Display all todo markers
 	@PAGER=cat git grep \T\O\D\O -- :^vendor
-
-commit:
-	@echo "Checking commit..."
-
-push: lint test
-	@echo "Validating changeset before push..."
