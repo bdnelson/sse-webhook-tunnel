@@ -4,6 +4,7 @@ coverage.html
 coverage.out
 *coverage.html
 *coverage.out
+*.log
 
 # Configuration
 .env
