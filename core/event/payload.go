@@ -1,8 +1,10 @@
 package event
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/url"
+	"strings"
 )
 
 // Parsed is the result of interpreting an SSE data frame as a forwardable
@@ -72,17 +74,60 @@ func Parse(data []byte) Parsed {
 		parsed.Headers["content-type"] = "application/json"
 	}
 
+	// Unwrap a GitHub form-encoded "payload" field into the inner JSON. This
+	// must run after the header loop so it overrides any copied content-type
+	// (e.g. application/x-www-form-urlencoded) with application/json.
+	if body, ok := unwrapPayload(parsed.Body); ok {
+		parsed.Body = body
+		parsed.Headers["content-type"] = "application/json"
+	}
+
 	return parsed
 }
 
 // rawFallback forwards the data verbatim as a JSON body with no replayed
-// headers or query parameters.
+// headers or query parameters. A GitHub form-encoded "payload" wrapper is still
+// unwrapped into its inner JSON.
 func rawFallback(data []byte) Parsed {
+	body := data
+	if unwrapped, ok := unwrapPayload(data); ok {
+		body = unwrapped
+	}
 	return Parsed{
 		Headers: map[string]string{"content-type": "application/json"},
-		Body:    data,
+		Body:    body,
 		Query:   url.Values{},
 	}
+}
+
+// unwrapPayload handles the GitHub form-encoded webhook shape. When body is a
+// JSON object whose "payload" field is a string containing a JSON object or
+// array, it returns that inner JSON (compacted) and true. Otherwise it returns
+// body unchanged and false.
+func unwrapPayload(body []byte) ([]byte, bool) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return body, false
+	}
+	raw, ok := obj["payload"]
+	if !ok {
+		return body, false
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil { // payload is not a string
+		return body, false
+	}
+	inner := []byte(strings.TrimSpace(s))
+	// Only unwrap a JSON object or array, per the intent ("JSON object"); this
+	// leaves scalar strings and non-JSON values alone.
+	if len(inner) == 0 || (inner[0] != '{' && inner[0] != '[') || !json.Valid(inner) {
+		return body, false
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, inner); err != nil {
+		return body, false
+	}
+	return buf.Bytes(), true
 }
 
 // parseQuery converts the envelope "query" value into url.Values. It accepts
