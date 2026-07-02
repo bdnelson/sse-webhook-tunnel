@@ -6,6 +6,11 @@ PROJECT_NAME := sse-webhook-tunnel
 BIN_NAME := sse-webhook-tunnel
 TEST_BIN_NAME := sse_webhook_tunnel
 
+# Release build parameters (override for cross-compilation)
+RELEASE_GOOS ?= $(shell go env GOOS)
+RELEASE_GOARCH ?= $(shell go env GOARCH)
+RELEASE_OUTPUT ?= $(BIN_NAME)
+
 # Colors for output
 BLUE := \033[0;34m
 GREEN := \033[0;32m
@@ -46,6 +51,10 @@ run: ## Run the project
 
 build: ## Build the project
 	go build -o $(BIN_NAME) ./api/cli
+
+build-release: ## Build a static, stripped binary (set RELEASE_GOOS/RELEASE_GOARCH/RELEASE_OUTPUT)
+	CGO_ENABLED=0 GOOS=$(RELEASE_GOOS) GOARCH=$(RELEASE_GOARCH) \
+		go build -buildvcs=false -ldflags="-w -s" -o $(RELEASE_OUTPUT) ./api/cli
 
 clean: ## Clean outputs
 	rm -f $(BIN_NAME)
