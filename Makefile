@@ -45,7 +45,7 @@ run: ## Run the project
 	go run ./api/cli
 
 build: ## Build the project
-	go build -buildvcs=false -o $(BIN_NAME) ./api/cli
+	go build -o $(BIN_NAME) ./api/cli
 
 clean: ## Clean outputs
 	rm -f $(BIN_NAME)
