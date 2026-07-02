@@ -27,6 +27,12 @@ is POSTed to the target URL. When the data is not a smee envelope (it is not a
 JSON object, or it has no `body` key) the raw data is forwarded verbatim as a
 JSON body.
 
+If the body is a `payload` form wrapper — the shape GitHub sends when a webhook
+is configured with the `application/x-www-form-urlencoded` content type,
+i.e. `{"payload":"<escaped JSON>"}` — the inner JSON is unwrapped and forwarded
+as the body with `Content-Type: application/json`. Bodies without such a wrapper
+are forwarded unchanged.
+
 Every event is shown in the TUI as a timestamped line
 (`2026-07-02 13:35:52 Payload received`) with a forwarding-status indicator.
 Selecting a line expands it to show the pretty-printed JSON payload. The list

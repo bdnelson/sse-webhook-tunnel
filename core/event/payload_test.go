@@ -95,3 +95,76 @@ func TestParse_QueryAsString(t *testing.T) {
 		t.Errorf("Query = %v, want a=1 b=2", got.Query)
 	}
 }
+
+func TestParse_UnwrapsPayloadEnvelope(t *testing.T) {
+	// GitHub form-encoded delivery: smee wraps the event JSON in a "payload"
+	// string field, and the envelope carries a form content-type.
+	data := `{
+		"content-type": "application/x-www-form-urlencoded",
+		"x-github-event": "create",
+		"body": {"payload": "{\"ref\":\"v0.0.73-dev\",\"ref_type\":\"tag\"}"}
+	}`
+
+	got := Parse([]byte(data))
+
+	if string(got.Body) != `{"ref":"v0.0.73-dev","ref_type":"tag"}` {
+		t.Errorf("Body = %q, want unwrapped inner JSON", string(got.Body))
+	}
+	// The form content-type must be overridden now that we send JSON.
+	if got.Headers["content-type"] != "application/json" {
+		t.Errorf("content-type = %q, want application/json after unwrap", got.Headers["content-type"])
+	}
+	// Non-payload headers are still replayed.
+	if got.Headers["x-github-event"] != "create" {
+		t.Errorf("x-github-event = %q, want create", got.Headers["x-github-event"])
+	}
+}
+
+func TestParse_UnwrapsPayloadRawFallback(t *testing.T) {
+	// No "body" key: the raw data itself is the payload wrapper.
+	got := Parse([]byte(`{"payload":"{\"ref\":\"x\"}"}`))
+	if string(got.Body) != `{"ref":"x"}` {
+		t.Errorf("Body = %q, want unwrapped inner JSON", string(got.Body))
+	}
+	if got.Headers["content-type"] != "application/json" {
+		t.Errorf("content-type = %q, want application/json", got.Headers["content-type"])
+	}
+}
+
+func TestParse_PayloadNotUnwrapped(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     string
+		wantBody string
+	}{
+		{
+			name:     "payload string is not valid JSON",
+			data:     `{"body":{"payload":"not json"}}`,
+			wantBody: `{"payload":"not json"}`,
+		},
+		{
+			name:     "payload string is a scalar, not an object",
+			data:     `{"body":{"payload":"\"hello\""}}`,
+			wantBody: `{"payload":"\"hello\""}`,
+		},
+		{
+			name:     "payload is already an object, not a string",
+			data:     `{"body":{"payload":{"ref":"x"}}}`,
+			wantBody: `{"payload":{"ref":"x"}}`,
+		},
+		{
+			name:     "no payload field",
+			data:     `{"body":{"action":"opened"}}`,
+			wantBody: `{"action":"opened"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Parse([]byte(tt.data))
+			if string(got.Body) != tt.wantBody {
+				t.Errorf("Body = %q, want unchanged %q", string(got.Body), tt.wantBody)
+			}
+		})
+	}
+}
