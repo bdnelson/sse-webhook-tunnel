@@ -1,0 +1,229 @@
+// Package tui implements the terminal user interface: a scrollable, paginated
+// list of inbound events that can be expanded to inspect the JSON payload,
+// with a status line showing uptime, event count, and the target URL.
+package tui
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/bdnelson/sse-webhook-tunnel/core/event"
+)
+
+// EventMsg carries a completed event into the Bubble Tea message loop. It is
+// sent by the Publisher from the tunnel goroutine.
+type EventMsg struct {
+	Event event.Event
+}
+
+// tickMsg drives the uptime clock in the status line.
+type tickMsg time.Time
+
+// viewMode is the current screen.
+type viewMode int
+
+const (
+	listView viewMode = iota
+	detailView
+)
+
+const (
+	statusHeight = 1
+	headerHeight = 2
+)
+
+// Model is the root Bubble Tea model.
+type Model struct {
+	list      list.Model
+	viewport  viewport.Model
+	keys      keyMap
+	mode      viewMode
+	startTime time.Time
+	targetURL string
+	sourceURL string
+	count     int
+	width     int
+	height    int
+	ready     bool
+	now       func() time.Time
+
+	statusStyle lipgloss.Style
+	headerStyle lipgloss.Style
+}
+
+var _ tea.Model = Model{}
+
+// New constructs the root model for the given source and target URLs.
+func New(sourceURL, targetURL string) Model {
+	l := list.New(nil, newItemDelegate(), 0, 0)
+	l.Title = "SSE Webhook Tunnel — Events"
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowHelp(true)
+
+	return Model{
+		list:      l,
+		viewport:  viewport.New(0, 0),
+		keys:      defaultKeyMap(),
+		mode:      listView,
+		startTime: time.Now(),
+		targetURL: targetURL,
+		sourceURL: sourceURL,
+		now:       time.Now,
+		statusStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("231")).
+			Background(lipgloss.Color("57")).
+			Padding(0, 1),
+		headerStyle: lipgloss.NewStyle().Bold(true).Padding(0, 1),
+	}
+}
+
+// Init implements tea.Model.
+func (m Model) Init() tea.Cmd {
+	return tick()
+}
+
+// tick schedules the next uptime refresh.
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+// Update implements tea.Model.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m.handleResize(msg), nil
+
+	case tickMsg:
+		return m, tick()
+
+	case EventMsg:
+		return m.handleEvent(msg), nil
+
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	}
+
+	return m.delegateToActive(msg)
+}
+
+// handleResize recomputes component dimensions to fit the terminal.
+func (m Model) handleResize(msg tea.WindowSizeMsg) Model {
+	m.width = msg.Width
+	m.height = msg.Height
+	m.ready = true
+
+	m.list.SetSize(msg.Width, msg.Height-statusHeight)
+	m.viewport.Width = msg.Width
+	m.viewport.Height = msg.Height - headerHeight - statusHeight
+	return m
+}
+
+// handleEvent appends a received event to the list.
+func (m Model) handleEvent(msg EventMsg) Model {
+	m.count++
+	items := m.list.Items()
+	m.list.InsertItem(len(items), eventItem{ev: msg.Event})
+	return m
+}
+
+// handleKey processes application-level key bindings and otherwise delegates to
+// the active component.
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Matches(msg, m.keys.Quit) {
+		return m, tea.Quit
+	}
+
+	switch m.mode {
+	case listView:
+		if key.Matches(msg, m.keys.Enter) {
+			if selected, ok := m.list.SelectedItem().(eventItem); ok {
+				m.viewport.SetContent(selected.ev.PrettyJSON())
+				m.viewport.GotoTop()
+				m.mode = detailView
+			}
+			return m, nil
+		}
+	case detailView:
+		if key.Matches(msg, m.keys.Back) {
+			m.mode = listView
+			return m, nil
+		}
+	}
+
+	return m.delegateToActive(msg)
+}
+
+// delegateToActive forwards a message to whichever component is on screen so
+// its navigation (cursor movement, paging, scrolling) works.
+func (m Model) delegateToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch m.mode {
+	case detailView:
+		m.viewport, cmd = m.viewport.Update(msg)
+	default:
+		m.list, cmd = m.list.Update(msg)
+	}
+	return m, cmd
+}
+
+// View implements tea.Model.
+func (m Model) View() string {
+	if !m.ready {
+		return "Initializing..."
+	}
+
+	switch m.mode {
+	case detailView:
+		return m.detailScreen()
+	default:
+		return m.listScreen()
+	}
+}
+
+func (m Model) listScreen() string {
+	return lipgloss.JoinVertical(lipgloss.Left, m.list.View(), m.statusLine())
+}
+
+func (m Model) detailScreen() string {
+	var header string
+	if selected, ok := m.list.SelectedItem().(eventItem); ok {
+		header = m.headerStyle.Render(selected.ev.Summary() + "  (esc: back)")
+	} else {
+		header = m.headerStyle.Render("(esc: back)")
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, header, m.viewport.View(), m.statusLine())
+}
+
+// statusLine renders uptime, event count, and target URL.
+func (m Model) statusLine() string {
+	uptime := m.now().Sub(m.startTime).Truncate(time.Second)
+	content := fmt.Sprintf("uptime %s │ events: %d │ target: %s",
+		formatDuration(uptime), m.count, m.targetURL)
+
+	line := m.statusStyle.Render(content)
+	if m.width > 0 {
+		line = m.statusStyle.Width(m.width).Render(content)
+	}
+	return line
+}
+
+// formatDuration renders a duration as HH:MM:SS.
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int(d.Seconds())
+	h := total / 3600
+	mn := (total % 3600) / 60
+	s := total % 60
+	return fmt.Sprintf("%02d:%02d:%02d", h, mn, s)
+}
