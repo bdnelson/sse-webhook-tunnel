@@ -13,7 +13,7 @@ import (
 	"sync"
 	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/bdnelson/sse-webhook-tunnel/app/tui"
 	"github.com/bdnelson/sse-webhook-tunnel/app/tunnel"
@@ -48,9 +48,10 @@ func run(cfg config) error {
 	defer cancel()
 
 	// Deriving the program's context from ctx means cancelling ctx also stops
-	// the TUI, and unblocks Publisher.Send if it is mid-delivery.
+	// the TUI, and unblocks Publisher.Send if it is mid-delivery. The alternate
+	// screen is requested by the model's View (tea.View.AltScreen) in v2.
 	model := tui.New(cfg.SourceURL, cfg.TargetURL)
-	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithContext(ctx))
 
 	client := sse.New(cfg.SourceURL, sse.WithLogger(log))
 	forwarder := forward.New(cfg.Insecure)
